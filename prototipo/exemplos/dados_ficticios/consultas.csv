@@ -1,0 +1,14 @@
+consulta_id,data,veterinario_id,status_atendimento,status_prontuario,fechado_em,campo_anamnese,campo_exame_fisico,campo_conduta,campo_identificacao_responsavel,campo_observacoes_extra
+C001,2026-10-02,V01,realizado,fechado,2026-10-02T17:00,S,S,S,S,N
+C002,2026-10-02,V01,realizado,aberto,,S,S,S,S,S
+C003,2026-10-02,V01,realizado,fechado,2026-10-02T17:10,S,S,N,S,S
+C004,2026-10-02,V02,realizado,fechado,2026-10-02T17:20,S,N,N,S,S
+C005,2026-10-02,V02,realizado,fechado,2026-10-03T08:00,S,S,S,S,S
+C006,2026-10-02,V02,realizado,fechado,2026-10-02T17:30,S,S,S,S,S
+C007,2026-10-02,V01,realizado,fechado,2026-10-02T17:40,S,S,S,S,S
+C008,2026-10-02,V02,realizado,fechado,2026-10-02T17:50,S,S,S,S,S
+C009,2026-10-02,V01,realizado,fechado,2026-10-02T18:00,S,S,S,S,S
+C010,2026-10-02,V02,cancelado,aberto,,S,S,S,S,S
+C011,2026-10-02,V01,cancelado,aberto,,S,S,S,S,S
+C012,2026-10-02,V02,realizado,fechado,2026-10-02T18:10,S,S,S,S,S
+C013,2026-10-02,V01,realizado,aberto,,S,S,S,S,S
