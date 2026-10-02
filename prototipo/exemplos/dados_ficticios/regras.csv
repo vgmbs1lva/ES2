@@ -1,0 +1,7 @@
+procedimento_codigo,item_codigo,grupo_alternativa,ato_clinico,controlado
+PROC_CONSULTA,ITEM_CONSULTA,,N,N
+PROC_EXAME_LAB,ITEM_EXAME_LAB,,S,N
+PROC_B,ITEM_B1,G1,N,N
+PROC_B,ITEM_B2,G1,N,N
+PROC_C,ITEM_C,,N,N
+PROC_SEDACAO_EX,ITEM_CONTROLADO_EX,,S,S
