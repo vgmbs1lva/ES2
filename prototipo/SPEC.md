@@ -124,7 +124,7 @@ Cada pendência tem: `finding_id` (estável: hash curto de `codigo + consulta_id
 | Código | Condição | Severidade |
 |---|---|---|
 | `P01_PRONTUARIO_ABERTO` | `status_atendimento=realizado` e `status_prontuario=aberto` | acao |
-| `P02_PRONTUARIO_INCOMPLETO` | Algum campo do checklist com `N` (lista os campos faltantes) | acao |
+| `P02_PRONTUARIO_INCOMPLETO` | Algum campo do checklist com `N` (lista os campos faltantes), em atendimento `realizado` (revisão 0.2: cancelado não gera P02, senão o dia ficaria bloqueado, pois P02 não é ignorável) | acao |
 | `P03_FECHADO_RETROATIVO` | `fechado_em` em data posterior à `data` do atendimento | info (mostra data-hora real; não bloqueia) |
 
 ### 6.2 Cobrança (conferência bidirecional)
@@ -193,6 +193,11 @@ Códigos de saída de `verificar`: 0 = CONFERIDO; 1 = PENDENTE; 2 = erro de entr
 6. WhatsApp, Drive, e-mail, interface web, painel, multiusuário, autenticação.
 7. Medição de ganho de tempo ou receita recuperada.
 8. Qualquer dado real de paciente ou tutor.
+
+Nota de revisão 0.2 (desvio conhecido): o protótipo inclui, além desta SPEC, os comandos `rascunho`, `aprovar`,
+`rejeitar` e `exportar` e o adaptador opcional `adaptadores/anthropic_redator.py` (redação de rascunhos atrás de
+portão de aprovação do veterinário). Não são cobertos por AC-01 a AC-21 (têm testes próprios) e não fazem parte
+do MVP a ser medido: o núcleo (verificar/decidir) segue sem LLM e sem rede (RF-10, AC-19). Ver README, "Desvios".
 
 ## 10. Riscos e mitigação
 

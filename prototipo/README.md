@@ -73,9 +73,13 @@ Subcomandos extras: `rejeitar` (motivo obrigatório). `python -m fechamento --he
 
 ### Códigos de saída
 
+Qualquer falha inesperada (disco, arquivo/log corrompido, não UTF-8) sai com **2**, nunca com 1: para quem
+automatiza, 1 significa só "dia pendente". Se a entrada falhar, `relatorio_<data>.md` e `pendencias_<data>.csv`
+de uma execução anterior são renomeados para `*.OBSOLETO` (um `CONFERIDO` antigo não pode continuar parecendo atual).
+
 | Comando | 0 | 1 | 2 | 3 |
 |---|---|---|---|---|
-| `verificar` | `CONFERIDO` | `PENDENTE` | entrada inválida (arquivo/linha na mensagem) | – |
+| `verificar` | `CONFERIDO` | `PENDENTE` | entrada inválida ou falha inesperada (arquivo/linha na mensagem) | – |
 | `decidir`, `rascunho`, `aprovar`, `rejeitar`, `exportar` | ok | – | entrada/uso inválido (inclui finding desconhecido) | recusado por regra |
 
 ## Arquitetura
@@ -91,7 +95,7 @@ fechamento/
   cli.py         argparse e códigos de saída
 adaptadores/anthropic_redator.py   adaptador OPCIONAL (fora do pacote) para a API da Anthropic
 exemplos/dados_ficticios/          fixture do dia 2026-10-02 (13 consultas + 1 linha órfã de fatura)
-tests/                             75 testes unittest (AC-01..AC-21 da SPEC + rascunhos + adaptador)
+tests/                             106 testes unittest (AC-01..AC-21 da SPEC + rascunhos + adaptador + correções pós-revisão)
 ```
 
 Separação pedida: **toda a lógica de regras, validação e templates é determinística** e roda sem LLM. A única
@@ -138,7 +142,7 @@ As guardas barram padrões óbvios; **não** provam segurança clínica. O veter
 ## Testes
 
 ```bash
-python -m unittest discover        # a partir de prototipo/; 75 testes, sem rede
+python -m unittest discover        # a partir de prototipo/; 106 testes, sem rede
 ```
 
 Cobrem AC-01 a AC-21 da SPEC (conjunto exato de pendências, anti falso positivo, evidência com linha,
@@ -161,9 +165,30 @@ imports de rede/SDK, sem dado pessoal) e o ciclo de rascunho/aprovação, inclui
 - As regras são independentes (RF/AC-03): numa base real, consulta realizada sem nenhum item **e** com
   procedimento mapeado gera C01 **e** C03. No fixture, C006/C013 não têm procedimento registrado para manter o
   conjunto esperado da SPEC exato.
-- K01 também é emitido para item controlado em fatura órfã e em atendimento cancelado.
+- **P02 só vale para atendimento `realizado`** (como P01). A SPEC §6.1 não filtrava por status, mas P02 não é
+  ignorável: sem o filtro, uma consulta `cancelado` com campo `N` bloquearia o dia para sempre.
+- `fechado_em` anterior à data do atendimento e `regras.csv` sem nenhuma regra são erro de entrada (saída 2).
+- `decidir`: `--responsavel` e `--motivo` não aceitam quebra de linha/caractere de controle nem CPF, e-mail ou
+  telefone (nomes e endereços **não** são detectáveis: use só códigos opacos). Texto livre vai escapado ao
+  relatório (`_md`) e, no CSV, `responsavel` que comece com `=`, `+`, `-`, `@` ganha apóstrofo.
+- Rascunho `REJEITADO` pode ser refeito: `rascunho` grava novo evento `criado` com o mesmo id.
+- `finding_id` de K01 órfão (fatura sem consulta) inclui a data do export. `finding_id` repetido (colisão de
+  hash de 32 bits) aborta com erro em vez de sobrescrever em silêncio.
+- A tabela "Decisões registradas" tem a coluna "Efeito": decisão substituída ou reprovada nas regras atuais
+  aparece como "sem efeito". Decisão **não** é presa ao hash de `regras.csv` (RF-09 prende à evidência).
+- `--redator modulo:Classe` faz `importlib.import_module` de qualquer módulo no `sys.path`: executa código
+  arbitrário local. Aceitável para uso local com dados fictícios; não exponha esse parâmetro a terceiros.
+- Guardas de dose ampliadas (comp, gts, ampola, mililitro, número por extenso, "dobro da dose"), mas continuam
+  **não** provando segurança clínica. `consulta_id` não dispara a guarda de CPF/telefone.
+- `aprovar` reimprime o texto aprovado e o SHA-256. Não há prova de que o veterinário o leu.
+- K01 para item controlado em fatura órfã e em atendimento cancelado.
 
 ## Limitações
+
+- Não corrigido de propósito (ver relatório de triagem): trilha sem encadeamento de hash (log editável),
+  `--agora` aceito em `decidir`, sem trava de concorrência no log, sem decisão em lote, erros de entrada reportados
+  um por vez, item controlado ausente de `regras.csv` não gera alerta (conforme SPEC), colunas `campo_*` fora do
+  checklist ignoradas sem aviso (conforme SPEC).
 
 - Sem autenticação: papel e nome são declarados e apenas registrados (rastro, não segurança).
 - O checklist de campos do exemplo é fictício. Res. CFMV 1.321/2020 e 1.653/2025: vigência, campos obrigatórios

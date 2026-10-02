@@ -95,15 +95,30 @@ class RedatorStub:
 
 
 # ------------------------------------------------------------------ Guardas
-_UNIDADES = r"(?:mg|mcg|ug|µg|g|kg|ml|ui|iu|cp|comprimidos?|gotas?|capsulas?|cápsulas?)"
-_RE_DOSE = re.compile(r"(?<![\w.,])\d+(?:[.,]\d+)?\s*(?:%|" + _UNIDADES + r"(?:/(?:kg|dia|h|ml|kg/dia))?(?![A-Za-zÀ-ÿ]))",
-                      re.IGNORECASE)
-_RE_CPF = re.compile(r"(?<!\d)\d{3}\.?\d{3}\.?\d{3}-?\d{2}(?!\d)")
+_UNIDADES = (r"(?:mg|mcg|ug|µg|g|kg|ml|ui|u\.i\.?|iu|cp|comps?|comprimidos?|gts?|gotas?|amp|ampolas?|"
+             r"capsulas?|cápsulas?|mililitros?|miligramas?|microgramas?|gramas?)")
+_NUMEROS = (r"(?:um|uma|dois|duas|tr[êe]s|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|meio|meia|"
+            r"vinte|trinta|quarenta|cinquenta|cem)")
+_RE_DOSE = re.compile(r"(?<![\w.,])(?:\d+(?:[.,]\d+)?(?:\s*/\s*\d+)?|" + _NUMEROS + r")\s*(?:%|" + _UNIDADES
+                      + r"(?:/(?:kg|dia|h|ml|kg/dia))?(?![A-Za-zÀ-ÿ]))", re.IGNORECASE)
+_RE_DOSE_VAGA = re.compile(r"(?<![A-Za-zÀ-ÿ])(?:dobro|metade|triplo)\s+d[ao]\s+dose", re.IGNORECASE)
+# (?<![\w]) / (?![\w]): um consulta_id opaco como A1234567890 nao e telefone nem CPF.
+_RE_CPF = re.compile(r"(?<![\w])\d{3}\.?\d{3}\.?\d{3}-?\d{2}(?![\w])")
 _RE_EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
-_RE_FONE = re.compile(r"(?<!\d)(?:\+?55\s?)?\(?\d{2}\)?\s?9?\d{4}[-\s]?\d{4}(?!\d)")
+_RE_FONE = re.compile(r"(?<![\w])(?:\+?55\s?)?\(?\d{2}\)?\s?9?\d{4}[-\s]?\d{4}(?![\w])")
 
 
-def verificar_texto(texto, exigir_sem_marcadores=False) -> List[str]:
+def verificar_pii(texto) -> List[str]:
+    """Padroes de dado pessoal obvios (CPF, e-mail, telefone). Nao detecta nomes nem enderecos."""
+    problemas = []
+    for rotulo, rx in (("CPF", _RE_CPF), ("e-mail", _RE_EMAIL), ("telefone", _RE_FONE)):
+        m = rx.search(texto or "")
+        if m:
+            problemas.append("padrao de %s detectado ('%s')" % (rotulo, m.group(0).strip()))
+    return problemas
+
+
+def verificar_texto(texto, exigir_sem_marcadores=False, ids_opacos=()) -> List[str]:
     """Guardas deterministicas sobre qualquer texto de rascunho/aprovado. Lista de problemas (vazia = ok).
 
     Nao e prova de seguranca clinica: apenas barra padroes obvios (dose, dado pessoal) e, na
@@ -113,15 +128,16 @@ def verificar_texto(texto, exigir_sem_marcadores=False) -> List[str]:
     if not (texto or "").strip():
         problemas.append("texto vazio")
         return problemas
-    if _RE_DOSE.search(texto):
-        problemas.append("padrao de dose/quantidade clinica detectado (ex.: mg, ml, %, UI): "
-                         "a ferramenta nao embute nem aceita doses; o veterinario deve tratar fora do texto")
-    if _RE_CPF.search(texto):
-        problemas.append("padrao de CPF detectado")
-    if _RE_EMAIL.search(texto):
-        problemas.append("padrao de e-mail detectado")
-    if _RE_FONE.search(texto):
-        problemas.append("padrao de telefone detectado")
+    # ids opacos (consulta_id) nao sao dado pessoal, mesmo que parecam CPF/telefone (ex.: 12345678901)
+    analisado = texto
+    for i in sorted((x for x in ids_opacos if x), key=len, reverse=True):
+        analisado = analisado.replace(i, " ")
+    m = _RE_DOSE.search(analisado) or _RE_DOSE_VAGA.search(analisado)
+    if m:
+        problemas.append("padrao de dose/quantidade clinica detectado ('%s'; ex.: mg, ml, comp, gts, %%, UI, "
+                         "numero por extenso): a ferramenta nao embute nem aceita doses; o veterinario deve "
+                         "tratar fora do texto" % m.group(0).strip())
+    problemas.extend(verificar_pii(analisado))
     if exigir_sem_marcadores and MARCADOR in texto:
         problemas.append("ainda ha marcador(es) '%s ...]' nao preenchido(s)" % MARCADOR)
     return problemas
@@ -137,7 +153,7 @@ def redigir_com_guardas(redator, contexto):
         raise DecisaoRejeitada("redator '%s' falhou: %s: %s" % (getattr(redator, "nome", "?"), type(e).__name__, e))
     if not isinstance(texto, str):
         raise DecisaoRejeitada("redator '%s' nao devolveu texto" % getattr(redator, "nome", "?"))
-    problemas = verificar_texto(texto)
+    problemas = verificar_texto(texto, ids_opacos=(contexto.consulta_id,))
     if problemas:
         raise DecisaoRejeitada("saida do redator '%s' barrada pelas guardas: %s"
                                % (getattr(redator, "nome", "?"), "; ".join(problemas)))

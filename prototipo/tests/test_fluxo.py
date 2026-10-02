@@ -86,7 +86,7 @@ class TestDecisoes(BaseTeste):
                 self.assertEqual(rc, 3)
                 self.assertIn("motivo", err)
                 self.assertEqual(self.log(), b"")
-        self.assertEqual(self.decidir(f, "ignorar", "financeiro", "1234567890")[0], 0)
+        self.assertEqual(self.decidir(f, "ignorar", "financeiro", "abcdefghij")[0], 0)
 
     def test_ac11_p01_e_p02_nao_sao_ignoraveis(self):
         for cod, cid in (("P01", "C002"), ("P02", "C003"), ("P02", "C004"), ("P01", "C013")):

@@ -7,10 +7,12 @@ ou uma decisao humana valida e terminal encerra. `encaminhado` nao e terminal.
 import csv
 import json
 import re
+import unicodedata
 from pathlib import Path
 
 from .erros import DecisaoRejeitada, ErroEntrada
 from .modelos import SEV_INFO
+from .redator import verificar_pii
 from .regras import NAO_IGNORAVEIS
 
 ARQ_LOG = "decisoes.jsonl"
@@ -18,10 +20,18 @@ DECISOES = ("ignorar", "encaminhado", "conferido_manual")
 PAPEIS = ("veterinario", "recepcao", "financeiro")
 TERMINAIS = ("ignorar", "conferido_manual")
 MIN_MOTIVO = 10  # caracteres nao brancos
+# colunas de pendencias_*.csv que `decidir`/`rascunho` usam
+COLUNAS_PENDENCIA = ("finding_id", "codigo", "severidade", "consulta_id", "mensagem", "exige_veterinario",
+                     "hash_regras", "hash_campos")
 
 
 def caracteres_uteis(texto):
     return len(re.sub(r"\s", "", texto or ""))
+
+
+def _tem_controle(texto):
+    """Caractere de controle ou separador de linha/paragrafo (\\n, \\r, U+2028, U+0085...)."""
+    return any(unicodedata.category(ch) in ("Cc", "Zl", "Zp") for ch in texto or "")
 
 
 def validar_decisao(codigo, severidade, exige_veterinario, decisao, motivo, papel, responsavel):
@@ -32,6 +42,13 @@ def validar_decisao(codigo, severidade, exige_veterinario, decisao, motivo, pape
         raise DecisaoRejeitada("papel '%s' invalido (use: %s)" % (papel, ", ".join(PAPEIS)))
     if not (responsavel or "").strip():
         raise DecisaoRejeitada("responsavel obrigatorio")
+    for rotulo, valor in (("responsavel", responsavel), ("motivo", motivo)):
+        if _tem_controle(valor):
+            raise DecisaoRejeitada("%s nao pode conter quebra de linha nem caractere de controle" % rotulo)
+        pii = verificar_pii(valor)
+        if pii:
+            raise DecisaoRejeitada("%s: %s; use so codigos opacos (sem CPF, e-mail, telefone ou nomes de "
+                                   "tutor/animal)" % (rotulo, "; ".join(pii)))
     if severidade == SEV_INFO:
         raise DecisaoRejeitada("%s e informativa: nao exige nem aceita decisao" % codigo)
     if decisao == "conferido_manual" and not codigo.startswith("K01"):
@@ -58,6 +75,9 @@ def ler_log(saida):
             try:
                 r = json.loads(linha)
                 assert isinstance(r, dict) and "finding_id" in r and "decisao" in r
+                # tipos: um valor nao-texto derrubaria situacao()/relatorio com excecao nao tratada
+                assert all(isinstance(r[k], str) for k in ("finding_id", "decisao"))
+                assert all(isinstance(r.get(k, ""), str) for k in ("motivo", "papel", "responsavel", "registrado_em"))
             except (ValueError, AssertionError):
                 raise ErroEntrada(ARQ_LOG, n, "linha invalida no log de decisoes")
             registros.append(r)
@@ -89,7 +109,12 @@ def localizar_finding(saida, finding_id):
     achado = None
     for caminho in sorted(Path(saida).glob("pendencias_*.csv")):
         with open(caminho, newline="", encoding="utf-8") as f:
-            for linha in csv.DictReader(f):
+            leitor = csv.DictReader(f)
+            faltando = [c for c in COLUNAS_PENDENCIA if c not in (leitor.fieldnames or [])]
+            if faltando:
+                raise ErroEntrada(caminho.name, 1, "coluna(s) faltando: %s (rode 'verificar' de novo)"
+                                  % ", ".join(faltando))
+            for linha in leitor:
                 if linha["finding_id"] == finding_id:
                     achado = linha
     return achado

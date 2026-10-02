@@ -5,6 +5,7 @@ Somente leitura (RF-02). Somente codigos opacos sao aceitos como identificadores
 
 import csv
 import hashlib
+import io
 import re
 from datetime import datetime
 from pathlib import Path
@@ -65,11 +66,15 @@ def _ler_csv(pasta, arquivo, obrigatorias, aceita_campo_prefixo=False):
         texto = caminho.read_text(encoding="utf-8-sig")
     except UnicodeDecodeError as e:
         raise ErroEntrada(arquivo, None, "nao esta em UTF-8 (%s)" % e.reason)
-    leitor = csv.reader(texto.splitlines(), delimiter=",")
+    # newline="": quebras DENTRO de campo entre aspas (e U+2028/U+0085) nao viram registros nem somem
+    leitor = csv.reader(io.StringIO(texto, newline=""), delimiter=",")
     try:
         cab = [c.strip() for c in next(leitor)]
     except StopIteration:
         raise ErroEntrada(arquivo, 1, "arquivo vazio (sem cabecalho)")
+    if len(cab) == 1 and ";" in cab[0]:
+        raise ErroEntrada(arquivo, 1, "o separador parece ser ';' (comum em CSV do Excel pt-BR); "
+                                      "o esperado e ',' (exporte como CSV UTF-8 separado por virgula)")
     _valida_cabecalho(arquivo, cab, obrigatorias, aceita_campo_prefixo)
     linhas = []
     for valores in leitor:
@@ -173,6 +178,9 @@ def carregar(pasta, data):
                 raise ErroEntrada(ARQ_CONSULTAS, n, "fechado_em='%s' invalido: esperado YYYY-MM-DDTHH:MM" % fe)
             if len(fe) != 16:
                 raise ErroEntrada(ARQ_CONSULTAS, n, "fechado_em='%s' invalido: esperado YYYY-MM-DDTHH:MM" % fe)
+            if fe[:10] < d:
+                raise ErroEntrada(ARQ_CONSULTAS, n, "fechado_em=%s e anterior a data do atendimento (%s): "
+                                  "dado inconsistente" % (fe, d))
         campos_linha = tuple((c[len(PREFIXO_CAMPO):], _sn(ARQ_CONSULTAS, n, r, c)) for c in colunas_campo)
         consultas.append(Consulta(cid, d, vet, sa, sp, fe, campos_linha, n))
 
@@ -195,6 +203,8 @@ def carregar(pasta, data):
         itens.append(ItemFatura(cid, item, int(q), n))
 
     _, lin = _ler_csv(pasta, ARQ_REGRAS, COLUNAS_REGRAS)
+    if not lin:
+        raise ErroEntrada(ARQ_REGRAS, None, "tabela de regras vazia (desligaria C03, C04 e K01 em silencio)")
     regras = []
     pares = {}
     for n, r in lin:

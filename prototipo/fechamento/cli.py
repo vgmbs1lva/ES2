@@ -2,6 +2,7 @@
 decidir/aprovar/rejeitar/exportar/rascunho 0=ok 2=erro de entrada 3=rejeitado por regra."""
 
 import argparse
+import csv
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -77,9 +78,27 @@ def _parser():
     return ap
 
 
+def _invalidar_saidas_antigas(saida, data):
+    """Entrada invalida: o relatorio/pendencias da mesma data (se existirem) ficam obsoletos e
+    poderiam continuar dizendo CONFERIDO. Renomeia para *.OBSOLETO (nunca apaga; nao cria relatorio)."""
+    for nome in ("relatorio_%s.md" % data, "pendencias_%s.csv" % data):
+        p = Path(saida) / nome
+        try:
+            if p.is_file():
+                p.replace(p.with_name(p.name + ".OBSOLETO"))
+                print("Aviso: %s era de uma execucao anterior e ficou obsoleto (renomeado para %s.OBSOLETO)."
+                      % (nome, nome), file=sys.stderr)
+        except OSError:
+            pass
+
+
 def _cmd_verificar(args):
     agora = _agora(args.agora)
-    dados = carregar(args.entrada, args.data)          # falha alto: nada e escrito antes disto
+    try:
+        dados = carregar(args.entrada, args.data)      # falha alto: nada e escrito antes disto
+    except ErroEntrada:
+        _invalidar_saidas_antigas(args.saida, args.data)
+        raise
     pendencias = aplicar_regras(dados)
     registros = decisoes.ler_log(args.saida)
     status = decisoes.situacao(pendencias, registros)
@@ -92,6 +111,9 @@ def _cmd_verificar(args):
     relatorio.gravar_atomico(saida / ("relatorio_%s.md" % args.data), md)
     abertas = sum(1 for s, _ in status.values() if s in ("aberta", "encaminhada"))
     print("Estado do dia %s: %s (%d pendencia(s) aberta(s), %d total)" % (args.data, estado, abertas, len(pendencias)))
+    if estado == "CONFERIDO":
+        print("CONFERIDO = todas as pendencias das regras do checklist/tabela em uso foram tratadas; "
+              "NAO certifica conformidade com norma do CFMV.")
     print("Relatorio: %s" % (saida / ("relatorio_%s.md" % args.data)))
     print("Pendencias: %s" % (saida / ("pendencias_%s.csv" % args.data)))
     return 0 if estado == "CONFERIDO" else 1
@@ -100,7 +122,9 @@ def _cmd_verificar(args):
 def _info(saida, finding):
     info = decisoes.localizar_finding(saida, finding)
     if info is None:
-        raise ErroEntrada(finding, None, "finding desconhecido em %s/pendencias_*.csv: rode 'verificar' antes" % saida)
+        raise ErroEntrada(finding, None, "finding desconhecido em %s/pendencias_*.csv da ultima verificacao: "
+                          "o id pode estar errado, 'verificar' ainda nao foi rodado, ou a pendencia deixou de "
+                          "existir porque o dado foi corrigido" % saida)
     return info
 
 
@@ -114,6 +138,7 @@ def _cmd_decidir(args):
         return 3
     print("Decisao registrada em %s: %s %s por %s (%s)" % (decisoes.ARQ_LOG, reg["decisao"], reg["finding_id"],
                                                           reg["responsavel"], reg["papel"]))
+    print("Pendencia: %s, consulta %s" % (info["codigo"], info["consulta_id"]))
     if reg["decisao"] == "encaminhado":
         print("Nota: 'encaminhado' NAO encerra a pendencia; ela some quando o dado for corrigido no PIMS "
               "e um novo 'verificar' for rodado.")
@@ -157,6 +182,9 @@ def _cmd_aprovar(args):
         return 3
     print("Rascunho %s APROVADO por %s (%s). Use 'exportar' para gravar o arquivo local." % (
         ev["rascunho_id"], ev["responsavel"], ev["papel"]))
+    print("Texto aprovado (sha256 %s). O texto final nao pode identificar tutor ou animal." % ev["texto_final_sha256"][:16])
+    print("-----")
+    print(ev["texto_final"])
     return 0
 
 
@@ -194,4 +222,9 @@ def main(argv=None):
         return _CMDS[args.cmd](args)
     except ErroEntrada as e:
         print("ERRO DE ENTRADA: %s" % e, file=sys.stderr)
+        return 2
+    except (OSError, UnicodeError, KeyError, TypeError, ValueError, csv.Error) as e:
+        # Falha inesperada (disco, arquivo corrompido, log malformado): NUNCA pode sair com 1,
+        # que significa PENDENTE para quem automatiza o fechamento.
+        print("ERRO INESPERADO (%s): %s" % (type(e).__name__, e), file=sys.stderr)
         return 2

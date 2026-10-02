@@ -6,6 +6,7 @@ Imprime apenas codigos opacos. Nada aqui escreve em prontuario ou fatura.
 import csv
 import io
 import os
+import unicodedata
 from collections import defaultdict
 from pathlib import Path
 
@@ -18,7 +19,15 @@ COLUNAS_CSV = ("finding_id", "codigo", "severidade", "consulta_id", "veterinario
 
 
 def _md(texto):
-    return str(texto).replace("|", "\\|").replace("\n", " ").replace("\r", " ")
+    t = str(texto).replace("|", "\\|")
+    # qualquer quebra de linha/paragrafo vira espaco: texto livre nao pode forjar linha ou cabecalho
+    return "".join(" " if unicodedata.category(ch) in ("Cc", "Zl", "Zp") else ch for ch in t)
+
+
+def _celula_csv(texto):
+    """Texto livre que comece com = + - @ viraria formula em planilha: prefixa apostrofo."""
+    t = str(texto)
+    return "'" + t if t[:1] in ("=", "+", "-", "@", "\t", "\r") else t
 
 
 def gravar_atomico(caminho, texto):
@@ -38,7 +47,7 @@ def gerar_csv(dados, pendencias, status):
         w.writerow([p.finding_id, p.codigo, p.severidade, p.consulta_id, p.veterinario_id, p.evidencia,
                     p.mensagem, p.regra_ref, "S" if p.exige_veterinario else "N", st,
                     reg["decisao"] if reg else "", reg["papel"] if reg else "",
-                    reg["responsavel"] if reg else "", dados.hash_regras, dados.hash_campos])
+                    _celula_csv(reg["responsavel"]) if reg else "", dados.hash_regras, dados.hash_campos])
     return buf.getvalue()
 
 
@@ -65,6 +74,9 @@ def gerar_md(dados, pendencias, registros, estado, agora):
     L.append("")
     L.append("- Gerado em: %s" % agora)
     L.append("- **Estado do dia: %s**" % estado)
+    if estado == "CONFERIDO":
+        L.append("- CONFERIDO significa: todas as pendências geradas pelas regras e pelo checklist em uso "
+                 "foram tratadas. Não certifica conformidade com norma do CFMV.")
     L.append("- Pendências abertas: %d (sem decisão: %d; encaminhadas, ainda não resolvidas no dado: %d)"
              % (n("aberta") + n("encaminhada"), n("aberta"), n("encaminhada")))
     L.append("- Pendências decididas (terminal, com motivo): %d" % n("decidida"))
@@ -112,8 +124,9 @@ def gerar_md(dados, pendencias, registros, estado, agora):
                 L.append("  - Decisão restrita ao papel `veterinario`.")
             if reg:
                 L.append("  - Última decisão: %s por %s (%s) em %s%s"
-                         % (reg["decisao"], reg["responsavel"], reg["papel"], reg["registrado_em"],
-                            (" — motivo: " + reg["motivo"]) if reg.get("motivo") else ""))
+                         % (_md(reg["decisao"]), _md(reg["responsavel"]), _md(reg["papel"]),
+                            _md(reg["registrado_em"]),
+                            (" — motivo: " + _md(reg["motivo"])) if reg.get("motivo") else ""))
         L.append("")
     if not por_vet:
         L.append("Nenhuma pendência.")
@@ -123,19 +136,22 @@ def gerar_md(dados, pendencias, registros, estado, agora):
     L.append("")
     aplicaveis = [r for r in registros if r["finding_id"] in por_id]
     if aplicaveis:
-        L.append("| Finding | Código | Consulta | Decisão | Papel | Responsável | Registrado em | Motivo |")
-        L.append("|---|---|---|---|---|---|---|---|")
+        L.append("| Finding | Código | Consulta | Decisão | Papel | Responsável | Registrado em | Motivo | Efeito |")
+        L.append("|---|---|---|---|---|---|---|---|---|")
         for r in aplicaveis:
             p = por_id[r["finding_id"]]
-            L.append("| %s | %s | %s | %s | %s | %s | %s | %s |" % tuple(_md(x) for x in (
+            vale = status[p.finding_id][1] is r
+            efeito = "vale" if vale else "sem efeito (substituída ou reprovada nas regras atuais)"
+            L.append("| %s | %s | %s | %s | %s | %s | %s | %s | %s |" % tuple(_md(x) for x in (
                 r["finding_id"], p.codigo, p.consulta_id, r["decisao"], r["papel"], r["responsavel"],
-                r["registrado_em"], r.get("motivo", ""))))
+                r["registrado_em"], r.get("motivo", ""), efeito)))
     else:
         L.append("Nenhuma decisão registrada para as pendências desta execução.")
-    orfas = len(registros) - len(aplicaveis)
+    orfas = [r for r in registros if r["finding_id"] not in por_id]
     if orfas:
         L.append("")
         L.append("%d decisão(ões) do log não se aplicam a nenhuma pendência atual (o dado foi corrigido "
-                 "ou o conteúdo da pendência mudou: decisão presa à evidência)." % orfas)
+                 "ou o conteúdo da pendência mudou: decisão presa à evidência): %s."
+                 % (len(orfas), ", ".join(sorted({_md(r["finding_id"]) for r in orfas}))))
     L.append("")
     return "\n".join(L)

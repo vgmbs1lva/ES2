@@ -73,10 +73,14 @@ def criar(saida, info, destino, redator, agora):
     texto = redigir_com_guardas(redator, ctx)
     rid = "R-" + _sha("|".join((info["finding_id"], destino, texto)))[:8]
     eventos = ler_eventos(saida)
-    if any(e["rascunho_id"] == rid and e["evento"] == "criado" for e in eventos):
+    existente = [e for e in eventos if e["rascunho_id"] == rid]
+    # Rascunho REJEITADO pode ser refeito (com o redator deterministico o id e o mesmo): novo evento
+    # `criado` reabre o ciclo como RASCUNHO. Rascunho vivo (RASCUNHO/APROVADO) e idempotente.
+    if existente and existente[-1]["evento"] != "rejeitado":
         return rid, texto, False
     _acrescentar(saida, {"evento": "criado", "rascunho_id": rid, "finding_id": info["finding_id"],
                          "codigo": info["codigo"], "destino": destino, "redator": redator.nome,
+                         "consulta_id": info["consulta_id"], "recriado": bool(existente),
                          "texto": texto, "texto_sha256": _sha(texto), "registrado_em": agora})
     return rid, texto, True
 
@@ -93,7 +97,7 @@ def aprovar(saida, rascunho_id, papel, responsavel, confirmo, agora, texto_final
     if est != "RASCUNHO":
         raise DecisaoRejeitada("rascunho %s esta %s: so RASCUNHO pode ser aprovado" % (rascunho_id, est))
     final = criado["texto"] if texto_final is None else texto_final
-    problemas = verificar_texto(final, exigir_sem_marcadores=True)
+    problemas = verificar_texto(final, exigir_sem_marcadores=True, ids_opacos=(criado.get("consulta_id", ""),))
     if problemas:
         raise DecisaoRejeitada("texto nao pode ser aprovado: " + "; ".join(problemas))
     ev = {"evento": "aprovado", "rascunho_id": rascunho_id, "papel": papel, "responsavel": responsavel.strip(),
@@ -119,13 +123,14 @@ def rejeitar(saida, rascunho_id, papel, responsavel, motivo, agora):
 
 def exportar(saida, rascunho_id):
     """Grava liberados/<id>.txt SOMENTE se APROVADO e integro. Nunca envia nem lanca em lugar nenhum."""
-    est, _, aprov = estado(ler_eventos(saida), rascunho_id)
+    est, criado, aprov = estado(ler_eventos(saida), rascunho_id)
     if est != "APROVADO":
         raise DecisaoRejeitada("rascunho %s esta %s: exportacao exige aprovacao explicita do veterinario"
                                % (rascunho_id, est))
     if _sha(aprov["texto_final"]) != aprov["texto_final_sha256"]:
         raise DecisaoRejeitada("texto aprovado nao confere com o hash registrado (log adulterado?)")
-    problemas = verificar_texto(aprov["texto_final"], exigir_sem_marcadores=True)
+    problemas = verificar_texto(aprov["texto_final"], exigir_sem_marcadores=True,
+                                ids_opacos=(criado.get("consulta_id", ""),))
     if problemas:
         raise DecisaoRejeitada("texto aprovado reprovado nas guardas: " + "; ".join(problemas))
     pasta = Path(saida) / PASTA_LIBERADOS

@@ -7,6 +7,7 @@ O conteudo das regras (checklist, tabela item x procedimento) vem so dos CSVs (R
 import hashlib
 from collections import defaultdict
 
+from .erros import ErroEntrada
 from .entrada import ARQ_CONSULTAS, ARQ_ITENS, ARQ_PROCEDIMENTOS, ARQ_REGRAS
 from .modelos import SEV_ACAO, SEV_ATENCAO, SEV_INFO, Pendencia
 
@@ -69,6 +70,10 @@ def p02_prontuario_incompleto(ix):
     out = []
     obrigatorios = [c.campo for c in ix.dados.campos_obrigatorios]
     for c in ix.dados.consultas:
+        # Atendimento cancelado nao tem prontuario a completar; sem este filtro o dia ficaria bloqueado
+        # (P02 nao e ignoravel) por uma consulta que nao aconteceu. Mesmo criterio de P01.
+        if c.status_atendimento != "realizado":
+            continue
         valores = dict(c.campos)
         faltantes = sorted(n for n in obrigatorios if valores.get(n) == "N")
         if faltantes:
@@ -197,7 +202,7 @@ def k01_controlado_conferir(ix):
         itens = por_chave[(cid, item)]
         c = ix.consulta.get(cid)
         vet = c.veterinario_id if c else SEM_CONSULTA
-        data = c.data if c else ""
+        data = c.data if c else ix.dados.data   # orfa: data do export, para a decisao nao valer em outro dia
         qtd = sum(i.quantidade for i in itens)
         evid = [(ARQ_CONSULTAS, c.linha)] if c else []
         evid += [(ARQ_ITENS, i.linha) for i in itens]
@@ -219,5 +224,11 @@ def aplicar_regras(dados):
     todas = []
     for fn in FUNCOES:
         todas.extend(fn(ix))
+    vistos = {}
+    for p in todas:
+        if p.finding_id in vistos:  # colisao de hash (32 bits): falhar alto em vez de sobrescrever em silencio
+            raise ErroEntrada("regras", None, "finding_id duplicado %s (%s e %s): decisoes poderiam valer "
+                              "para a pendencia errada" % (p.finding_id, vistos[p.finding_id], p.codigo))
+        vistos[p.finding_id] = p.codigo
     todas.sort(key=lambda p: (p.veterinario_id, p.consulta_id, p.codigo, p.finding_id))
     return todas
